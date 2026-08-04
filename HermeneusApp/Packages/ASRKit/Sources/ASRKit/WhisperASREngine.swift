@@ -14,24 +14,10 @@ public actor WhisperASREngine: ASREngine {
             return AsyncThrowingStream { $0.finish() }
         }
         
-        var request = URLRequest(url: serverURL)
-        request.httpMethod = "POST"
-        let boundary = "Boundary-\(UUID().uuidString)"
-        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 20.0
-        
-        var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
-        body.append("\(language)\r\n".data(using: .utf8)!)
-        
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
-        body.append(wavData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        
-        request.httpBody = body
+        // request 的构造（含 multipart body 拼接）收敛进 buildTranscribeRequest，
+        // 这里的 request 从声明起就是不可变的 let，Task{} 闭包捕获时天然满足
+        // Sendable / Strict Concurrency 检查，不会有 "captured var" 报错。
+        let request = buildTranscribeRequest(wavData: wavData, language: language)
         
         return AsyncThrowingStream { continuation in
             Task {
@@ -59,6 +45,28 @@ public actor WhisperASREngine: ASREngine {
     }
     
     public func abortCurrentTask() async {}
+    
+    private func buildTranscribeRequest(wavData: Data, language: String) -> URLRequest {
+        var request = URLRequest(url: serverURL)
+        request.httpMethod = "POST"
+        let boundary = "Boundary-\(UUID().uuidString)"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 20.0
+
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"language\"\r\n\r\n".data(using: .utf8)!)
+        body.append("\(language)\r\n".data(using: .utf8)!)
+
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"speech.wav\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: audio/wav\r\n\r\n".data(using: .utf8)!)
+        body.append(wavData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        request.httpBody = body
+        return request
+    }
     
     private func createStandardWavData(from pcm: [Float], sampleRate: Int) -> Data? {
         guard !pcm.isEmpty else { return nil }
