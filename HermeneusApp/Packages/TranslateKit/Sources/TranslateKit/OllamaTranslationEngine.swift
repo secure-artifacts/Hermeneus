@@ -42,37 +42,10 @@ public actor OllamaTranslationEngine: TranslationEngine {
 
         let prompt = await buildPrompt(text: trimmedInput, contextHistory: contextHistory, targetLanguage: targetLanguage)
 
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = requestTimeout
-
-        var options: [String: Any] = [
-            "temperature": 0.05,
-            "top_k": 5,
-            "top_p": 0.9,
-            "num_ctx": 1536,
-            "num_predict": 220,
-            "repeat_penalty": 1.30,
-            "stop": ["\nText:", "\nTranslation:", "\n【当前】", "\n【上文】"]
-        ]
-        if let numThread {
-            options["num_thread"] = numThread
-        }
-
-        let body: [String: Any] = [
-            "model": modelName,
-            "prompt": prompt,
-            "stream": true,
-            "keep_alive": keepAlive,
-            "options": options
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        // 到此为止 request 已构造完成、不会再被修改，
-        // 用同名 let 做一次不可变快照，Task{} 闭包只捕获这个 let，
-        // 满足 Strict Concurrency 检查，且没有任何额外拷贝/性能开销。
-        let request = request
+        // request 在这里只声明一次、是不可变的 let（内部构造细节封装进
+        // buildOllamaRequest，函数内部用 var 组装，返回时已经是完整的值），
+        // 这样 Task{} 闭包捕获的天然就是一个 Sendable 的 let，满足严格并发检查。
+        let request = try buildOllamaRequest(prompt: prompt)
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -115,6 +88,36 @@ public actor OllamaTranslationEngine: TranslationEngine {
     }
 
     
+    private func buildOllamaRequest(prompt: String) throws -> URLRequest {
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = requestTimeout
+
+        var options: [String: Any] = [
+            "temperature": 0.05,
+            "top_k": 5,
+            "top_p": 0.9,
+            "num_ctx": 1536,
+            "num_predict": 220,
+            "repeat_penalty": 1.30,
+            "stop": ["\nText:", "\nTranslation:", "\n【当前】", "\n【上文】"]
+        ]
+        if let numThread {
+            options["num_thread"] = numThread
+        }
+
+        let body: [String: Any] = [
+            "model": modelName,
+            "prompt": prompt,
+            "stream": true,
+            "keep_alive": keepAlive,
+            "options": options
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        return request
+    }
+
     private func sanitizeTokens(_ text: String) -> String {
         var result = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let trashPatterns = [
