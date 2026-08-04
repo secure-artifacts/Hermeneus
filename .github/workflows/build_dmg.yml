@@ -23,7 +23,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 根据 Git Tag (如 v1.0.1) 自动解析版本号字符串 (1.0.1)
       - name: Resolve Version String
         id: version
         run: |
@@ -38,7 +37,6 @@ jobs:
         with:
           python-version: "3.10"
 
-      # [FIX 1] 兼容 requirements.txt 位于仓库根目录或 asr_server/ 子目录两种情况
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
@@ -101,35 +99,34 @@ jobs:
               cp -R "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" "$APP_BUNDLE/Contents/Resources/"
             fi
 
-            # 内部 Info.plist 版本号同步联动 ${VERSION}
             cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>AILiveInterpreterApp</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.hermeneus.ailiveinterpreter</string>
-    <key>CFBundleName</key>
-    <string>Hermeneus</string>
-    <key>CFBundleDisplayName</key>
-    <string>Hermeneus</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
-    <key>CFBundleVersion</key>
-    <string>1</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>14.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-    <key>NSMicrophoneUsageDescription</key>
-    <string>需要访问麦克风以进行实时语音同传</string>
-</dict>
-</plist>
-EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleExecutable</key>
+              <string>AILiveInterpreterApp</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.hermeneus.ailiveinterpreter</string>
+              <key>CFBundleName</key>
+              <string>Hermeneus</string>
+              <key>CFBundleDisplayName</key>
+              <string>Hermeneus</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>${VERSION}</string>
+              <key>CFBundleVersion</key>
+              <string>1</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>14.0</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>NSMicrophoneUsageDescription</key>
+              <string>需要访问麦克风以进行实时语音同传</string>
+          </dict>
+          </plist>
+          EOF
 
             echo "✅ .app bundle 组装完成（未注入 asr_server，未签名）: $(pwd)/$APP_BUNDLE"
           else
@@ -145,8 +142,6 @@ EOF
           echo "✅ APP_BUNDLE_PATH=$APP_ABS_PATH"
           echo "APP_BUNDLE_PATH=$APP_ABS_PATH" >> "$GITHUB_ENV"
 
-      # 轻量升级包 (Lite)：不含 macOS 字样，放入下拉框"其他产物"
-      # [FIX 2] create-dmg 在无头 CI 环境下 AppleScript 常返回非零码，即便 DMG 已生成；改为用产物是否存在来判定成败
       - name: Package Lite DMG (Swift app only)
         run: |
           set -e
@@ -174,8 +169,6 @@ EOF
           fi
           echo "✅ Lite DMG 产物校验通过: Hermeneus-v${VERSION}-Lite.dmg"
 
-      # 完整安装包 (Full)：注入 macOS 关键字，命中网站 macOS 主下载位
-      # [FIX 2] 同上，为 create-dmg 添加产物存在性兜底校验，避免 AppleScript 假报错中断流程
       - name: Package Full DMG (Swift app + ASR engine)
         run: |
           set -e
@@ -214,8 +207,6 @@ EOF
           fi
           echo "✅ Full DMG 产物校验通过: Hermeneus-macOS-v${VERSION}-Full.dmg"
 
-      # [FIX 3] 无条件上传构建产物为 Actions Artifact，确保 workflow_dispatch 手动触发时也能下载测试
-      # （不加 if 条件，push tag 触发时同样会上传，作为发布前的双重保障，不影响下方的 Release 流程）
       - name: Upload DMG Artifacts (for manual runs / QA)
         uses: actions/upload-artifact@v4
         with:
