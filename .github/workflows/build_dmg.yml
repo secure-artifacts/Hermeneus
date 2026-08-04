@@ -42,22 +42,27 @@ jobs:
       - name: Build SwiftUI App for Apple Silicon
         run: |
           cd HermeneusApp
-          XCODEPROJ=$(find . -maxdepth 2 -name "*.xcodeproj" | head -n 1)
+          XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/.*" | head -n 1)
+          SWIFTPKG=$(find . -name "Package.swift" -not -path "*/.*" | head -n 1)
+          
           if [ -n "$XCODEPROJ" ]; then
             SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | grep -A 10 "Schemes:" | tail -n +2 | tr -d " " | head -n 1)
-            echo "🚀 找到工程: $XCODEPROJ, 提取 Scheme: $SCHEME_NAME"
+            echo "🚀 递归检索到 Xcode 工程: $XCODEPROJ, 提取 Scheme: $SCHEME_NAME"
             xcodebuild -project "$XCODEPROJ" -scheme "$SCHEME_NAME" -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -arch arm64
-          elif [ -f "Package.swift" ]; then
-            echo "🚀 识别为 Swift Package 项目，开始编译..."
+          elif [ -n "$SWIFTPKG" ]; then
+            PKG_DIR=$(dirname "$SWIFTPKG")
+            echo "🚀 递归检索到 Swift Package 目录: $PKG_DIR"
+            cd "$PKG_DIR"
             swift build -c release --arch arm64
           else
-            echo "❌ 未在 HermeneusApp 目录下找到 .xcodeproj 或 Package.swift 文件！"
+            echo "❌ 在 HermeneusApp 目录下未找到 .xcodeproj 或 Package.swift！"
+            ls -R
             exit 1
           fi
 
       - name: Package into DMG
         run: |
-          APP_PATH=$(find HermeneusApp -name "*.app" | head -n 1)
+          APP_PATH=$(find HermeneusApp -name "*.app" -not -path "*/.*" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "❌ 未找到编译生成的 .app 文件！"
             exit 1
