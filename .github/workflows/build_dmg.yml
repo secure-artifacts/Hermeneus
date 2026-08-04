@@ -8,12 +8,16 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build-macOS-arm64:
     runs-on: macos-14
     permissions:
-      contents: write   # softprops/action-gh-release 需要写权限才能创建 Release、上传文件
+      contents: write      # softprops/action-gh-release 需要写权限才能创建 Release、上传文件
+      id-token: write      # actions/attest-build-provenance 需要用来签发 OIDC token
+      attestations: write  # actions/attest-build-provenance 需要写权限才能生成构件证明
 
     steps:
       - name: Checkout Code
@@ -146,6 +150,11 @@ jobs:
             --app-drop-link 425 120 \
             "Hermeneus-AppleSilicon.dmg" \
             "$APP_PATH"
+
+      - name: Attest Build Provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: "Hermeneus-AppleSilicon.dmg"
 
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
