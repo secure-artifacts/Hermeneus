@@ -1,0 +1,31 @@
+# macOS 系统临时文件
+.DS_Store
+*.swp
+
+# Xcode & Swift 编译产物
+.build/
+*.xcodeproj/project.xcworkspace/
+*.xcodeproj/xcuserdata/
+DerivedData/
+
+# Python 缓存与虚拟环境
+__pycache__/
+*.pyc
+venv/
+.venv/
+build/
+dist/
+*.egg-info/
+
+# ASR 模型文件与临时音频（防泄露与体积过大）
+*.pt
+*.pth
+*.onnx
+*.bin
+*.wav
+*.pcm
+asr_server/dist/
+asr_server/build/
+
+# 敏感配置文件
+*.env
