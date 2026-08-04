@@ -1,0 +1,68 @@
+name: Build M-Chip DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-macOS-arm64:
+    runs-on: macos-14
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller -r requirements.txt
+
+      - name: Build ASR Server Executable (ARM64)
+        run: |
+          cd asr_server
+          pyinstaller --clean --onefile --name asr_server \
+            --collect-all funasr \
+            --collect-all faster_whisper \
+            --collect-all torch \
+            --collect-all ctranslate2 \
+            server.py
+          mkdir -p ../HermeneusApp/Sources/Resources/
+          cp dist/asr_server ../HermeneusApp/Sources/Resources/ || true
+
+      - name: Install create-dmg tool
+        run: brew install create-dmg
+
+      - name: Build SwiftUI App for Apple Silicon
+        run: |
+          cd HermeneusApp
+          xcodebuild -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -arch arm64 || true
+
+      - name: Package into DMG
+        run: |
+          APP_PATH=$(find HermeneusApp/build -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: .app file not found!"
+            exit 1
+          fi
+          create-dmg \
+            --volname "Hermeneus" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 425 120 \
+            "Hermeneus-AppleSilicon.dmg" \
+            "$APP_PATH"
+
+      - name: Upload DMG to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Hermeneus-AppleSilicon.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
