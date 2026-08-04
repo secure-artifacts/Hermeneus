@@ -44,7 +44,7 @@ public final class SCKAudioCapturer: NSObject, @unchecked Sendable, SCStreamOutp
         guard let floatData = pcmBuffer.floatChannelData?[0] else { return }
         
         let frameLength = Int(pcmBuffer.frameLength)
-        var samples = [Float](repeating: 0, count: frameLength)
+        let samples = [Float](repeating: 0, count: frameLength)
         for i in 0..<frameLength {
             samples[i] = floatData[i]
         }

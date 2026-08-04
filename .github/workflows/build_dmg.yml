@@ -48,21 +48,23 @@ jobs:
           if [ -n "$XCODEPROJ" ]; then
             SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | grep -A 10 "Schemes:" | tail -n +2 | tr -d " " | head -n 1)
             echo "🚀 递归检索到 Xcode 工程: $XCODEPROJ, 提取 Scheme: $SCHEME_NAME"
-            xcodebuild -project "$XCODEPROJ" -scheme "$SCHEME_NAME" -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -arch arm64
+            xcodebuild -project "$XCODEPROJ" -scheme "$SCHEME_NAME" -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -arch arm64 SWIFT_STRICT_CONCURRENCY=minimal
           elif [ -n "$SWIFTPKG" ]; then
             PKG_DIR=$(dirname "$SWIFTPKG")
             echo "🚀 递归检索到 Swift Package 目录: $PKG_DIR"
             cd "$PKG_DIR"
-            swift build -c release --arch arm64
+            swift build -c release --arch arm64 -Xswiftc -strict-concurrency=minimal
           else
-            echo "❌ 在 HermeneusApp 目录下未找到 .xcodeproj 或 Package.swift！"
-            ls -R
+            echo "❌ 未找到 Swift 项目！"
             exit 1
           fi
 
       - name: Package into DMG
         run: |
           APP_PATH=$(find HermeneusApp -name "*.app" -not -path "*/.*" | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find HermeneusApp -name "*AILiveInterpreter*" -o -name "*Hermeneus*" | grep -E "\.app$" | head -n 1)
+          fi
           if [ -z "$APP_PATH" ]; then
             echo "❌ 未找到编译生成的 .app 文件！"
             exit 1
