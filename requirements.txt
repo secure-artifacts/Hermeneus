@@ -1,0 +1,8 @@
+torch
+faster-whisper
+funasr
+modelscope
+soundfile
+bottle
+numpy
+ctranslate2
