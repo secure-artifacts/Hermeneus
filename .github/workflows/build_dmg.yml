@@ -37,7 +37,9 @@ jobs:
           cp dist/asr_server ../HermeneusApp/Sources/Resources/ || true
 
       - name: Install create-dmg tool
-        run: brew install create-dmg
+        run: |
+          brew untap aws/tap 2>/dev/null || true
+          brew install create-dmg
 
       - name: Build SwiftUI App for Apple Silicon
         run: |
