@@ -99,10 +99,11 @@ jobs:
               cp -R "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" "$APP_BUNDLE/Contents/Resources/"
             fi
 
-            cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
+            python3 -c "
+          version = '${VERSION}'
+          content = '''<?xml version=\"1.0\" encoding=\"UTF-8\"?>
+          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
+          <plist version=\"1.0\">
           <dict>
               <key>CFBundleExecutable</key>
               <string>AILiveInterpreterApp</string>
@@ -115,7 +116,7 @@ jobs:
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>${VERSION}</string>
+              <string>''' + version + '''</string>
               <key>CFBundleVersion</key>
               <string>1</string>
               <key>LSMinimumSystemVersion</key>
@@ -125,8 +126,10 @@ jobs:
               <key>NSMicrophoneUsageDescription</key>
               <string>需要访问麦克风以进行实时语音同传</string>
           </dict>
-          </plist>
-          EOF
+          </plist>'''
+          with open('$APP_BUNDLE/Contents/Info.plist', 'w', encoding='utf-8') as f:
+              f.write(content.strip())
+          "
 
             echo "✅ .app bundle 组装完成（未注入 asr_server，未签名）: $(pwd)/$APP_BUNDLE"
           else
@@ -168,6 +171,13 @@ jobs:
             exit 1
           fi
           echo "✅ Lite DMG 产物校验通过: Hermeneus-v${VERSION}-Lite.dmg"
+
+          zip -q -9 "Hermeneus-v${VERSION}-Lite.zip" "Hermeneus-v${VERSION}-Lite.dmg"
+          if [ ! -f "Hermeneus-v${VERSION}-Lite.zip" ]; then
+            echo "❌ ZIP 压缩失败，未生成 Lite ZIP 产物"
+            exit 1
+          fi
+          echo "✅ Lite ZIP 压缩包生成完成: Hermeneus-v${VERSION}-Lite.zip"
 
       - name: Package Full DMG (Swift app + ASR engine)
         run: |
@@ -213,7 +223,7 @@ jobs:
           name: Hermeneus-DMG-${{ steps.version.outputs.VERSION }}
           path: |
             Hermeneus-macOS-v*-Full.dmg
-            Hermeneus-v*-Lite.dmg
+            Hermeneus-v*-Lite.zip
           if-no-files-found: error
           retention-days: 14
 
@@ -222,7 +232,7 @@ jobs:
         with:
           subject-path: |
             Hermeneus-macOS-v*-Full.dmg
-            Hermeneus-v*-Lite.dmg
+            Hermeneus-v*-Lite.zip
 
       - name: Upload DMGs to Release
         uses: softprops/action-gh-release@v2
@@ -231,6 +241,6 @@ jobs:
           name: "Hermeneus-传译者 v${{ steps.version.outputs.VERSION }}"
           files: |
             Hermeneus-macOS-v*-Full.dmg
-            Hermeneus-v*-Lite.dmg
+            Hermeneus-v*-Lite.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
