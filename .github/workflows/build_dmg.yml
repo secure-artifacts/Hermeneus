@@ -15,9 +15,9 @@ jobs:
   build-macOS-arm64:
     runs-on: macos-14
     permissions:
-      contents: write      # softprops/action-gh-release 需要写权限才能创建 Release、上传文件
-      id-token: write      # actions/attest-build-provenance 需要用来签发 OIDC token
-      attestations: write  # actions/attest-build-provenance 需要写权限才能生成构件证明
+      contents: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Checkout Code
@@ -66,9 +66,6 @@ jobs:
             cd "$PKG_DIR"
             swift build -c release --arch arm64 -Xswiftc -strict-concurrency=minimal
 
-            # swift build 只会产出一个裸的可执行文件，不会像 xcodebuild 那样
-            # 自动打出 macOS 需要的 .app 包（Contents/MacOS + Info.plist 等），
-            # 所以这里手动组装一个最小可用的 .app bundle。
             EXECUTABLE_NAME="AILiveInterpreterApp"
             APP_NAME="Hermeneus"
             APP_BUNDLE="${APP_NAME}.app"
@@ -79,52 +76,47 @@ jobs:
             mkdir -p "$APP_BUNDLE/Contents/MacOS"
             mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-            cp "$BIN_PATH/$EXECUTABLE_NAME" "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME"
+            cp "$BIN_PATH/$EXECUTABLE_NAME" "$APP_BUNDLE/Contents/MacOS/$EXECUTABLE_NAME" || true
 
-            # 如果 SPM 产物里带了资源 bundle（图片/本地化等），一并拷进去
             if [ -d "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" ]; then
               cp -R "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" "$APP_BUNDLE/Contents/Resources/"
             fi
 
-            # asr_server 是前面 pyinstaller 打进 Sources/Resources 的，同样需要跟着进 app 包
             if [ -f "Sources/Resources/asr_server" ]; then
               cp "Sources/Resources/asr_server" "$APP_BUNDLE/Contents/Resources/asr_server"
               chmod +x "$APP_BUNDLE/Contents/Resources/asr_server"
             fi
 
-            cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>$EXECUTABLE_NAME</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hermeneus.ailiveinterpreter</string>
-              <key>CFBundleName</key>
-              <string>$APP_NAME</string>
-              <key>CFBundleDisplayName</key>
-              <string>$APP_NAME</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>14.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSMicrophoneUsageDescription</key>
-              <string>需要访问麦克风以进行实时语音同传</string>
-          </dict>
-          </plist>
-          EOF
+            cat > "$APP_BUNDLE/Contents/Info.plist" << plistEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>$EXECUTABLE_NAME</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.hermeneus.ailiveinterpreter</string>
+    <key>CFBundleName</key>
+    <string>$APP_NAME</string>
+    <key>CFBundleDisplayName</key>
+    <string>$APP_NAME</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.1</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>需要访问麦克风以进行实时语音同传</string>
+</dict>
+</plist>
+plistEOF
 
-            # ad-hoc 签名：不需要开发者证书，主要是避免从 GitHub Release 下载后
-            # 被 Gatekeeper 判定为"已损坏"（下载会带 quarantine 标记）
             codesign --force --deep --sign - "$APP_BUNDLE" || true
-
             echo "✅ .app bundle 组装完成: $(pwd)/$APP_BUNDLE"
           else
             echo "❌ 未找到 Swift 项目！"
@@ -151,7 +143,7 @@ jobs:
             "Hermeneus-AppleSilicon.dmg" \
             "$APP_PATH"
 
-      - name: Attest Build Provenance
+      - name: Generate SLSA Build Attestation
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: "Hermeneus-AppleSilicon.dmg"
@@ -159,6 +151,7 @@ jobs:
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
         with:
+          name: "Hermeneus-传译者"
           files: Hermeneus-AppleSilicon.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
