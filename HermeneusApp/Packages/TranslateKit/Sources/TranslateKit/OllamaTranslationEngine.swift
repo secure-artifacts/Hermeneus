@@ -69,7 +69,11 @@ public actor OllamaTranslationEngine: TranslationEngine {
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-                
+        // 到此为止 request 已构造完成、不会再被修改，
+        // 用同名 let 做一次不可变快照，Task{} 闭包只捕获这个 let，
+        // 满足 Strict Concurrency 检查，且没有任何额外拷贝/性能开销。
+        let request = request
+
         return AsyncThrowingStream { continuation in
             let task = Task {
                 do {
