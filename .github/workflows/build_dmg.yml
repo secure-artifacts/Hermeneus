@@ -99,37 +99,7 @@ jobs:
               cp -R "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" "$APP_BUNDLE/Contents/Resources/"
             fi
 
-            python3 -c "
-          version = '${VERSION}'
-          content = '''<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-          <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
-          <plist version=\"1.0\">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>AILiveInterpreterApp</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hermeneus.ailiveinterpreter</string>
-              <key>CFBundleName</key>
-              <string>Hermeneus</string>
-              <key>CFBundleDisplayName</key>
-              <string>Hermeneus</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>''' + version + '''</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>14.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSMicrophoneUsageDescription</key>
-              <string>需要访问麦克风以进行实时语音同传</string>
-          </dict>
-          </plist>'''
-          with open('$APP_BUNDLE/Contents/Info.plist', 'w', encoding='utf-8') as f:
-              f.write(content.strip())
-          "
+            python3 -c "import plistlib; path='$APP_BUNDLE/Contents/Info.plist'; data={'CFBundleExecutable': 'AILiveInterpreterApp', 'CFBundleIdentifier': 'com.hermeneus.ailiveinterpreter', 'CFBundleName': 'Hermeneus', 'CFBundleDisplayName': 'Hermeneus', 'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '${VERSION}', 'CFBundleVersion': '1', 'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True, 'NSMicrophoneUsageDescription': '需要访问麦克风以进行实时语音同传'}; f=open(path, 'wb'); plistlib.dump(data, f); f.close()"
 
             echo "✅ .app bundle 组装完成（未注入 asr_server，未签名）: $(pwd)/$APP_BUNDLE"
           else
