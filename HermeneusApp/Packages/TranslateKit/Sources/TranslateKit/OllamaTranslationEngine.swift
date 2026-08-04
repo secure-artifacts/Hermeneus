@@ -2,7 +2,10 @@ import Foundation
 
 public actor OllamaTranslationEngine: TranslationEngine {
     private let endpoint: URL
-    private let modelName: String
+    // 改动 1：modelName 从 `let` 改成 `var`。
+    // 之前硬编码 "qwen2.5:7b" 且不可变，改模型只能重新初始化整个引擎
+    // (等于重开一次翻译会话)。现在允许在运行期通过 updateModel(_:) 热切换。
+    private var modelName: String
     private let numThread: Int?
     private let requestTimeout: TimeInterval
     private let keepAlive: String
@@ -11,7 +14,11 @@ public actor OllamaTranslationEngine: TranslationEngine {
 
     public init(
         endpoint: URL = URL(string: "http://localhost:11434/api/generate")!,
-        modelName: String = "qwen2.5:7b",
+        // 改动 2：默认值改为 "qwen2.5:3b"，仅作为“探测/调用方都没配置时”的
+        // 最终兜底。正常路径下，App 启动时应该由 OllamaModelManager.resolvePreferredModel()
+        // 决定真正使用的模型，再通过 updateModel(_:) 或下面的 init 参数注入，
+        // 而不是依赖这个默认值。
+        modelName: String = "qwen2.5:3b",
         numThread: Int? = nil,
         requestTimeout: TimeInterval = 60.0,
         keepAlive: String = "30m",
@@ -25,6 +32,15 @@ public actor OllamaTranslationEngine: TranslationEngine {
         self.keepAlive = keepAlive
         self.onTermCorrectionExtracted = onTermCorrectionExtracted
         self.contextPromptProvider = contextPromptProvider
+    }
+
+    // 改动 3：新增热切换入口。OllamaModelStore.onModelChanged 回调应该
+    // 调用 `await engine.updateModel(to: newName)`，下一次 translate()
+    // 就会用新模型发请求，不需要重建 actor、也不打断正在进行的会话状态
+    // （比如 contextHistory 仍在调用方手里，天然保留）。
+    public func updateModel(to newModelName: String) {
+        guard newModelName != modelName else { return }
+        modelName = newModelName
     }
 
     public func translate(
@@ -45,6 +61,9 @@ public actor OllamaTranslationEngine: TranslationEngine {
         // request 在这里只声明一次、是不可变的 let（内部构造细节封装进
         // buildOllamaRequest，函数内部用 var 组装，返回时已经是完整的值），
         // 这样 Task{} 闭包捕获的天然就是一个 Sendable 的 let，满足严格并发检查。
+        // 注意：buildOllamaRequest 读取的是调用这一刻的 self.modelName，
+        // 所以即便 updateModel(to:) 在两次 translate() 之间被调用，
+        // 每次请求都会带上"当时"最新的模型名，不存在陈旧闭包捕获的问题。
         let request = try buildOllamaRequest(prompt: prompt)
 
         return AsyncThrowingStream { continuation in

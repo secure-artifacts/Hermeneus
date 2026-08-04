@@ -23,15 +23,35 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # 根据 Git Tag (如 v1.0.1) 自动解析版本号字符串 (1.0.1)
+      - name: Resolve Version String
+        id: version
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "VERSION=dev-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
 
+      # [FIX 1] 兼容 requirements.txt 位于仓库根目录或 asr_server/ 子目录两种情况
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller -r requirements.txt
+          if [ -f "asr_server/requirements.txt" ]; then
+            REQ_FILE="asr_server/requirements.txt"
+          elif [ -f "requirements.txt" ]; then
+            REQ_FILE="requirements.txt"
+          else
+            echo "❌ 未找到 requirements.txt（asr_server/ 与仓库根目录均未找到）"
+            exit 1
+          fi
+          echo "📦 使用依赖文件: $REQ_FILE"
+          pip install pyinstaller -r "$REQ_FILE"
 
       - name: Build ASR Server Executable (ARM64)
         run: |
@@ -42,8 +62,6 @@ jobs:
             --collect-all torch \
             --collect-all ctranslate2 \
             server.py
-          mkdir -p ../HermeneusApp/Sources/Resources/
-          cp dist/asr_server ../HermeneusApp/Sources/Resources/ || true
 
       - name: Install create-dmg tool
         run: |
@@ -53,9 +71,10 @@ jobs:
       - name: Build SwiftUI App for Apple Silicon
         run: |
           cd HermeneusApp
+          VERSION="${{ steps.version.outputs.VERSION }}"
           XCODEPROJ=$(find . -name "*.xcodeproj" -not -path "*/.*" | head -n 1)
           SWIFTPKG=$(find . -name "Package.swift" -not -path "*/.*" | head -n 1)
-          
+
           if [ -n "$XCODEPROJ" ]; then
             SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | grep -A 10 "Schemes:" | tail -n +2 | tr -d " " | head -n 1)
             echo "🚀 递归检索到 Xcode 工程: $XCODEPROJ, 提取 Scheme: $SCHEME_NAME"
@@ -82,77 +101,145 @@ jobs:
               cp -R "$BIN_PATH/${EXECUTABLE_NAME}_${EXECUTABLE_NAME}.bundle" "$APP_BUNDLE/Contents/Resources/"
             fi
 
-            if [ -f "Sources/Resources/asr_server" ]; then
-              cp "Sources/Resources/asr_server" "$APP_BUNDLE/Contents/Resources/asr_server"
-              chmod +x "$APP_BUNDLE/Contents/Resources/asr_server"
-            fi
+            # 内部 Info.plist 版本号同步联动 ${VERSION}
+            cat > "$APP_BUNDLE/Contents/Info.plist" << EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>AILiveInterpreterApp</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.hermeneus.ailiveinterpreter</string>
+    <key>CFBundleName</key>
+    <string>Hermeneus</string>
+    <key>CFBundleDisplayName</key>
+    <string>Hermeneus</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>${VERSION}</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>需要访问麦克风以进行实时语音同传</string>
+</dict>
+</plist>
+EOF
 
-            cat > "$APP_BUNDLE/Contents/Info.plist" << 'EOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-              <key>CFBundleExecutable</key>
-              <string>AILiveInterpreterApp</string>
-              <key>CFBundleIdentifier</key>
-              <string>com.hermeneus.ailiveinterpreter</string>
-              <key>CFBundleName</key>
-              <string>Hermeneus</string>
-              <key>CFBundleDisplayName</key>
-              <string>Hermeneus</string>
-              <key>CFBundlePackageType</key>
-              <string>APPL</string>
-              <key>CFBundleShortVersionString</key>
-              <string>1.0.0</string>
-              <key>CFBundleVersion</key>
-              <string>1</string>
-              <key>LSMinimumSystemVersion</key>
-              <string>14.0</string>
-              <key>NSHighResolutionCapable</key>
-              <true/>
-              <key>NSMicrophoneUsageDescription</key>
-              <string>需要访问麦克风以进行实时语音同传</string>
-          </dict>
-          </plist>
-          EOF
-
-            codesign --force --deep --sign - "$APP_BUNDLE" || true
-            echo "✅ .app bundle 组装完成: $(pwd)/$APP_BUNDLE"
+            echo "✅ .app bundle 组装完成（未注入 asr_server，未签名）: $(pwd)/$APP_BUNDLE"
           else
             echo "❌ 未找到 Swift 项目！"
             exit 1
           fi
 
-      - name: Package into DMG
-        run: |
-          APP_PATH=$(find HermeneusApp -name "*.app" -not -path "*/.*" | head -n 1)
-          if [ -z "$APP_PATH" ]; then
-            APP_PATH=$(find HermeneusApp -name "*AILiveInterpreter*" -o -name "*Hermeneus*" | grep -E "\.app$" | head -n 1)
-          fi
-          if [ -z "$APP_PATH" ]; then
-            echo "❌ 未找到编译生成的 .app 文件！"
+          APP_ABS_PATH=$(find "$(pwd)" -maxdepth 6 -name "*.app" -not -path "*/.*" | head -n 1)
+          if [ -z "$APP_ABS_PATH" ]; then
+            echo "❌ 未找到组装好的 .app！"
             exit 1
           fi
-          echo "✅ 找到 Target App 路径: $APP_PATH"
+          echo "✅ APP_BUNDLE_PATH=$APP_ABS_PATH"
+          echo "APP_BUNDLE_PATH=$APP_ABS_PATH" >> "$GITHUB_ENV"
+
+      # 轻量升级包 (Lite)：不含 macOS 字样，放入下拉框"其他产物"
+      # [FIX 2] create-dmg 在无头 CI 环境下 AppleScript 常返回非零码，即便 DMG 已生成；改为用产物是否存在来判定成败
+      - name: Package Lite DMG (Swift app only)
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          LITE_STAGE="$RUNNER_TEMP/dmg_stage/lite"
+          rm -rf "$LITE_STAGE" && mkdir -p "$LITE_STAGE"
+
+          cp -R "$APP_BUNDLE_PATH" "$LITE_STAGE/"
+          LITE_APP="$LITE_STAGE/$(basename "$APP_BUNDLE_PATH")"
+
+          codesign --force --deep --sign - "$LITE_APP"
+
           create-dmg \
-            --volname "Hermeneus" \
+            --volname "Hermeneus (Lite)" \
             --window-pos 200 120 \
             --window-size 600 400 \
             --icon-size 100 \
             --app-drop-link 425 120 \
-            "Hermeneus-AppleSilicon.dmg" \
-            "$APP_PATH"
+            "Hermeneus-v${VERSION}-Lite.dmg" \
+            "$LITE_APP" || true
+
+          if [ ! -f "Hermeneus-v${VERSION}-Lite.dmg" ]; then
+            echo "❌ create-dmg 执行失败，且未生成 Lite DMG 产物"
+            exit 1
+          fi
+          echo "✅ Lite DMG 产物校验通过: Hermeneus-v${VERSION}-Lite.dmg"
+
+      # 完整安装包 (Full)：注入 macOS 关键字，命中网站 macOS 主下载位
+      # [FIX 2] 同上，为 create-dmg 添加产物存在性兜底校验，避免 AppleScript 假报错中断流程
+      - name: Package Full DMG (Swift app + ASR engine)
+        run: |
+          set -e
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          ASR_BIN="$GITHUB_WORKSPACE/asr_server/dist/asr_server"
+
+          if [ ! -f "$ASR_BIN" ]; then
+            echo "❌ 未找到 PyInstaller 产物: $ASR_BIN"
+            exit 1
+          fi
+
+          FULL_STAGE="$RUNNER_TEMP/dmg_stage/full"
+          rm -rf "$FULL_STAGE" && mkdir -p "$FULL_STAGE"
+
+          cp -R "$APP_BUNDLE_PATH" "$FULL_STAGE/"
+          FULL_APP="$FULL_STAGE/$(basename "$APP_BUNDLE_PATH")"
+
+          mkdir -p "$FULL_APP/Contents/Resources"
+          cp "$ASR_BIN" "$FULL_APP/Contents/Resources/asr_server"
+          chmod +x "$FULL_APP/Contents/Resources/asr_server"
+
+          codesign --force --deep --sign - "$FULL_APP"
+
+          create-dmg \
+            --volname "Hermeneus (Full)" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 425 120 \
+            "Hermeneus-macOS-v${VERSION}-Full.dmg" \
+            "$FULL_APP" || true
+
+          if [ ! -f "Hermeneus-macOS-v${VERSION}-Full.dmg" ]; then
+            echo "❌ create-dmg 执行失败，且未生成 Full DMG 产物"
+            exit 1
+          fi
+          echo "✅ Full DMG 产物校验通过: Hermeneus-macOS-v${VERSION}-Full.dmg"
+
+      # [FIX 3] 无条件上传构建产物为 Actions Artifact，确保 workflow_dispatch 手动触发时也能下载测试
+      # （不加 if 条件，push tag 触发时同样会上传，作为发布前的双重保障，不影响下方的 Release 流程）
+      - name: Upload DMG Artifacts (for manual runs / QA)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hermeneus-DMG-${{ steps.version.outputs.VERSION }}
+          path: |
+            Hermeneus-macOS-v*-Full.dmg
+            Hermeneus-v*-Lite.dmg
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Attest Build Provenance
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "Hermeneus-AppleSilicon.dmg"
+          subject-path: |
+            Hermeneus-macOS-v*-Full.dmg
+            Hermeneus-v*-Lite.dmg
 
-      - name: Upload DMG to Release
+      - name: Upload DMGs to Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
-          name: "Hermeneus-传译者"
-          files: Hermeneus-AppleSilicon.dmg
+          name: "Hermeneus-传译者 v${{ steps.version.outputs.VERSION }}"
+          files: |
+            Hermeneus-macOS-v*-Full.dmg
+            Hermeneus-v*-Lite.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
