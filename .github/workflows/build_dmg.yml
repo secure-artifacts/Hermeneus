@@ -39,8 +39,15 @@ jobs:
 
       - name: Install Python Dependencies
         run: |
+          set -e
           python -m pip install --upgrade pip
-          pip install "setuptools<81" wheel
+
+          # 关键修复：setuptools>=70.0.0 重构了 pkg_resources，移除了
+          # NullProvider / pkg_resources.extern 等 API，PyInstaller 内置的
+          # pyi_rth_pkgres 运行时钩子仍依赖这些旧 API，二者组合会导致打包出的
+          # 二进制在启动阶段直接崩溃（AttributeError: NullProvider）。
+          # 69.5.1 是社区验证过的最后一个兼容版本，锁死它。
+          pip install "setuptools==69.5.1" wheel
 
           if [ -f "asr_server/requirements.txt" ]; then
             REQ_FILE="asr_server/requirements.txt"
@@ -53,10 +60,43 @@ jobs:
           echo "📦 使用依赖文件: $REQ_FILE"
           pip install "pyinstaller>=6.20,<7" "pyinstaller-hooks-contrib>=2026.1" -r "$REQ_FILE"
 
+          # 二次断言：torch / funasr / modelscope 这类重型依赖的安装过程有时会
+          # 通过 build-system 依赖间接把 setuptools 悄悄升级回 70+，
+          # 在打包前强制拉回 69.5.1 并打印版本，避免"本地能过、CI 又崩"。
+          pip install "setuptools==69.5.1" --force-reinstall --no-deps
+          echo "🔒 最终 setuptools 版本锁定为:"
+          pip show setuptools | grep -E "^Version"
+
       - name: Build ASR Server Executable (ARM64)
         run: |
+          set -e
           cd asr_server
           pyinstaller --clean --noconfirm asr_server.spec
+
+      - name: Smoke Test ASR Binary (Fail Fast)
+        run: |
+          set -e
+          BIN="asr_server/dist/asr_server"
+          if [ ! -f "$BIN" ]; then
+            echo "❌ 未找到打包产物: $BIN"
+            exit 1
+          fi
+          chmod +x "$BIN"
+
+          echo "🔎 冒烟测试：启动二进制并观察前 5 秒是否存活（提前捕获 pyi_rth_pkgres / NullProvider 之类的启动期崩溃，不用等到 DMG 打完才发现）..."
+          "$BIN" > /tmp/asr_smoke.log 2>&1 &
+          SMOKE_PID=$!
+          sleep 5
+
+          if ! kill -0 "$SMOKE_PID" 2>/dev/null; then
+            echo "❌ ASR 二进制在启动阶段崩溃，完整日志如下："
+            cat /tmp/asr_smoke.log
+            exit 1
+          fi
+
+          echo "✅ 二进制存活 5 秒，冒烟测试通过"
+          kill "$SMOKE_PID" 2>/dev/null || true
+          wait "$SMOKE_PID" 2>/dev/null || true
 
       - name: Install create-dmg tool
         run: |
