@@ -1,5 +1,3 @@
-mkdir -p .github/workflows
-cat << 'EOF' > .github/workflows/build_dmg.yml
 name: Build M-Chip DMG
 
 on:
@@ -194,4 +192,3 @@ jobs:
             Hermeneus-v*-Lite.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-EOF
