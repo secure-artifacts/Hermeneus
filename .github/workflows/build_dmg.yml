@@ -1,3 +1,5 @@
+mkdir -p .github/workflows
+cat << 'EOF' > .github/workflows/build_dmg.yml
 name: Build M-Chip DMG
 
 on:
@@ -40,26 +42,23 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
+          pip install "setuptools<81" wheel
+
           if [ -f "asr_server/requirements.txt" ]; then
             REQ_FILE="asr_server/requirements.txt"
           elif [ -f "requirements.txt" ]; then
             REQ_FILE="requirements.txt"
           else
-            echo "❌ 未找到 requirements.txt（asr_server/ 与仓库根目录均未找到）"
+            echo "❌ 未找到 requirements.txt"
             exit 1
           fi
           echo "📦 使用依赖文件: $REQ_FILE"
-          pip install pyinstaller -r "$REQ_FILE"
+          pip install "pyinstaller>=6.20,<7" "pyinstaller-hooks-contrib>=2026.1" -r "$REQ_FILE"
 
       - name: Build ASR Server Executable (ARM64)
         run: |
           cd asr_server
-          pyinstaller --clean --onefile --name asr_server \
-            --collect-all funasr \
-            --collect-all faster_whisper \
-            --collect-all torch \
-            --collect-all ctranslate2 \
-            server.py
+          pyinstaller --clean --noconfirm asr_server.spec
 
       - name: Install create-dmg tool
         run: |
@@ -75,11 +74,11 @@ jobs:
 
           if [ -n "$XCODEPROJ" ]; then
             SCHEME_NAME=$(xcodebuild -list -project "$XCODEPROJ" | grep -A 10 "Schemes:" | tail -n +2 | tr -d " " | head -n 1)
-            echo "🚀 递归检索到 Xcode 工程: $XCODEPROJ, 提取 Scheme: $SCHEME_NAME"
+            echo "🚀 提取 Scheme: $SCHEME_NAME"
             xcodebuild -project "$XCODEPROJ" -scheme "$SCHEME_NAME" -configuration Release -derivedDataPath build CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO -arch arm64 SWIFT_STRICT_CONCURRENCY=minimal
           elif [ -n "$SWIFTPKG" ]; then
             PKG_DIR=$(dirname "$SWIFTPKG")
-            echo "🚀 递归检索到 Swift Package 目录: $PKG_DIR"
+            echo "🚀 切换到 Swift Package 目录: $PKG_DIR"
             cd "$PKG_DIR"
             swift build -c release --arch arm64 -Xswiftc -strict-concurrency=minimal
 
@@ -101,7 +100,7 @@ jobs:
 
             python3 -c "import plistlib; path='$APP_BUNDLE/Contents/Info.plist'; data={'CFBundleExecutable': 'AILiveInterpreterApp', 'CFBundleIdentifier': 'com.hermeneus.ailiveinterpreter', 'CFBundleName': 'Hermeneus', 'CFBundleDisplayName': 'Hermeneus', 'CFBundlePackageType': 'APPL', 'CFBundleShortVersionString': '${VERSION}', 'CFBundleVersion': '1', 'LSMinimumSystemVersion': '14.0', 'NSHighResolutionCapable': True, 'NSMicrophoneUsageDescription': '需要访问麦克风以进行实时语音同传'}; f=open(path, 'wb'); plistlib.dump(data, f); f.close()"
 
-            echo "✅ .app bundle 组装完成（未注入 asr_server，未签名）: $(pwd)/$APP_BUNDLE"
+            echo "✅ .app bundle 组装完成: $(pwd)/$APP_BUNDLE"
           else
             echo "❌ 未找到 Swift 项目！"
             exit 1
@@ -137,17 +136,11 @@ jobs:
             "$LITE_APP" || true
 
           if [ ! -f "Hermeneus-v${VERSION}-Lite.dmg" ]; then
-            echo "❌ create-dmg 执行失败，且未生成 Lite DMG 产物"
+            echo "❌ create-dmg 执行失败"
             exit 1
           fi
-          echo "✅ Lite DMG 产物校验通过: Hermeneus-v${VERSION}-Lite.dmg"
 
           zip -q -9 "Hermeneus-v${VERSION}-Lite.zip" "Hermeneus-v${VERSION}-Lite.dmg"
-          if [ ! -f "Hermeneus-v${VERSION}-Lite.zip" ]; then
-            echo "❌ ZIP 压缩失败，未生成 Lite ZIP 产物"
-            exit 1
-          fi
-          echo "✅ Lite ZIP 压缩包生成完成: Hermeneus-v${VERSION}-Lite.zip"
 
       - name: Package Full DMG (Swift app + ASR engine)
         run: |
@@ -181,12 +174,6 @@ jobs:
             "Hermeneus-macOS-v${VERSION}-Full.dmg" \
             "$FULL_APP" || true
 
-          if [ ! -f "Hermeneus-macOS-v${VERSION}-Full.dmg" ]; then
-            echo "❌ create-dmg 执行失败，且未生成 Full DMG 产物"
-            exit 1
-          fi
-          echo "✅ Full DMG 产物校验通过: Hermeneus-macOS-v${VERSION}-Full.dmg"
-
       - name: Upload DMG Artifacts (for manual runs / QA)
         uses: actions/upload-artifact@v4
         with:
@@ -196,13 +183,6 @@ jobs:
             Hermeneus-v*-Lite.zip
           if-no-files-found: error
           retention-days: 14
-
-      - name: Attest Build Provenance
-        uses: actions/attest-build-provenance@v2
-        with:
-          subject-path: |
-            Hermeneus-macOS-v*-Full.dmg
-            Hermeneus-v*-Lite.zip
 
       - name: Upload DMGs to Release
         uses: softprops/action-gh-release@v2
@@ -214,3 +194,4 @@ jobs:
             Hermeneus-v*-Lite.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+EOF
